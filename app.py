@@ -2,9 +2,7 @@ import streamlit as st
 import pandas as pd
 import networkx as nx
 import os
-import pickle
 from pyvis.network import Network
-import community.community_louvain as community_louvain
 import streamlit.components.v1 as components
 import gdown 
 
@@ -14,7 +12,8 @@ import gdown
 st.set_page_config(page_title="BioGraph 整合分析平台", layout="wide", page_icon="🧬")
 
 # 路径设置
-DATA_FILE = "data/master_graph_data.csv.gz"
+# 🔴 修改点 1: 去掉 .gz 后缀，因为你 Drive 上存的可能是普通 CSV
+DATA_FILE = "data/master_graph_data.csv" 
 CACHE_DIR = "checkpoints"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -23,28 +22,35 @@ def load_graph_data():
     """
     核心数据加载函数：只在启动时运行一次，之后会缓存。
     """
-    # 1. 如果文件不存在，从 Google Drive 下载
-    if not os.path.exists(DATA_FILE):
-        # 确保 data 文件夹存在
-        os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
-        
+    # 确保 data 文件夹存在
+    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
+
+    # 🔴 修改点 2: 检查文件是否存在，如果文件太小(说明下载失败)也重新下载
+    if not os.path.exists(DATA_FILE) or os.path.getsize(DATA_FILE) < 1000:
         # 你的 Google Drive 文件 ID
         file_id = '1tM-n8EOVCPNLg9j9JfoIgg-SFYSML5XM' 
         url = f'https://drive.google.com/uc?id={file_id}'
         
         # 显示下载提示
-        with st.spinner('正在从云端下载数据 (首次运行较慢)...'):
-            # --- 修正点在这里：把 file_path 改为 DATA_FILE ---
-            gdown.download(url, DATA_FILE, quiet=False)
+        with st.spinner('正在从云端下载数据 (首次运行可能需要 1-2 分钟)...'):
+            # fuzzy=True 可以防止因为 Google Drive 病毒扫描提示导致的下载失败
+            gdown.download(url, DATA_FILE, quiet=False, fuzzy=True)
 
     # 2. 读取数据
-    with st.spinner('正在加载核心图谱数据 (这可能需要几秒钟)...'):
-        # 检查下载是否成功
+    with st.spinner('正在加载核心图谱数据...'):
+        # 再次检查
         if not os.path.exists(DATA_FILE):
+            st.error("下载失败。")
             return None, None
 
-        # 读取 CSV (支持 .gz 自动解压)
-        df = pd.read_csv(DATA_FILE)
+        # 🔴 修改点 3: 明确告诉 pandas 这是普通 CSV，不需要解压
+        try:
+            df = pd.read_csv(DATA_FILE)
+        except Exception as e:
+            st.error(f"读取 CSV 出错: {e}")
+            # 如果读取失败，可能是文件坏了，尝试删除以便下次重启重下
+            os.remove(DATA_FILE)
+            return None, None
         
         # 构建 NetworkX 图
         G = nx.Graph()
@@ -73,7 +79,7 @@ def load_graph_data():
 G, master_df = load_graph_data()
 
 if G is None:
-    st.error(f"❌ 数据加载失败或文件未找到: {DATA_FILE}。请检查 Google Drive 链接权限是否公开。")
+    st.error(f"❌ 数据加载失败。请尝试点击右上角菜单 'Clear cache' 并重启 App。")
     st.stop()
 
 # 获取所有基因列表供下拉框使用
@@ -106,7 +112,6 @@ if module == "🕵️‍♂️ 深度蛋白侦探":
 
     col1, col2 = st.columns(2)
     with col1:
-        # 防止列表为空导致报错
         default_gene = 'TP53' if 'TP53' in ALL_GENES else ALL_GENES[0] if ALL_GENES else ""
         target = st.selectbox("选择目标蛋白:", ALL_GENES, index=ALL_GENES.index(default_gene) if default_gene in ALL_GENES else 0)
     with col2:
