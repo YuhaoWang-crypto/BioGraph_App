@@ -1,0 +1,10 @@
+streamlit
+pandas
+networkx
+pyvis
+metapredict
+biopython
+scipy
+community
+python-Louvain
+gdown
