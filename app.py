@@ -28,10 +28,9 @@ def load_graph_data():
     if not os.path.exists(DATA_FILE):
         # return None, None
 	# file_id = 'XXXXX_YOUR_FILE_ID_XXXXX' 
-	
-	file_id = '1tM-n8EOVCPNLg9j9JfoIgg-SFYSML5XM' 
-	url = f'https://drive.google.com/uc?id={file_id}'
-	gdown.download(url, file_path, quiet=False)
+        file_id = '1tM-n8EOVCPNLg9j9JfoIgg-SFYSML5XM' 
+        url = f'https://drive.google.com/uc?id={file_id}'
+        gdown.download(url, file_path, quiet=False)
 
 
     with st.spinner('正在加载核心图谱数据 (这可能需要几秒钟)...'):
