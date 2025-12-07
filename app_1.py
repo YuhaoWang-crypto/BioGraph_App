@@ -189,7 +189,7 @@ elif module.startswith("📚"):
 # ==========================================
 elif module.startswith("⚖️"):
     st.header("⚖️ 全景双轨分析 (Balanced View)")
-    st.markdown("对比 **已知通路 (BioGRID)** 与 **AI 预测 (Swmed)**，发现模块间的潜在联系。")
+    st.markdown("对比 **已知通路 ** 与 **AI 预测 **，发现模块间的潜在联系。")
     
     opts = list(FUNCTION_THEMES.keys())
     c1, c2 = st.columns(2)
