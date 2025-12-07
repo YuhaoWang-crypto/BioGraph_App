@@ -428,35 +428,35 @@ elif module.startswith("💧"):
             except:
                 st.warning("云端缺少 metapredict 或网络问题。")
                 
-    with tab2:
-        if st.button("扫描潜在液滴互作"):
-            # 扫描图谱中 IDR > 0.4 的节点
-            high_idr_nodes = []
-            for n, d in G.nodes(data=True):
-                # 尝试从节点属性读取 idr (如果之前存过)
-                idr = d.get('idr', -1)
-                if idr > 0.4:
-                    high_idr_nodes.append({'Gene': n, 'IDR': idr, 'Loc': d.get('loc')})
+    # with tab2:
+    #     if st.button("扫描潜在液滴互作"):
+    #         # 扫描图谱中 IDR > 0.4 的节点
+    #         high_idr_nodes = []
+    #         for n, d in G.nodes(data=True):
+    #             # 尝试从节点属性读取 idr (如果之前存过)
+    #             idr = d.get('idr', -1)
+    #             if idr > 0.4:
+    #                 high_idr_nodes.append({'Gene': n, 'IDR': idr, 'Loc': d.get('loc')})
             
-            if not high_idr_nodes:
-                st.warning("当前图谱数据中未包含预计算的 IDR 信息。请在 Colab 中运行 '批量计算' 并保存到 CSV。")
-            else:
-                st.write(f"发现 {len(high_idr_nodes)} 个高无序蛋白。正在两两配对...")
-                # 简单的两两配对逻辑 (取前 50 个演示)
-                cands = sorted(high_idr_nodes, key=lambda x:x['IDR'], reverse=True)[:50]
-                pairs = []
-                for i in range(len(cands)):
-                    for j in range(i+1, len(cands)):
-                        u, v = cands[i], cands[j]
-                        # 如果没有已知互作，且 AI 分数低，但都有高 IDR -> 可能是 LLPS
-                        if not G.has_edge(u['Gene'], v['Gene']):
-                            pairs.append({
-                                "Protein A": u['Gene'], "IDR A": u['IDR'],
-                                "Protein B": v['Gene'], "IDR B": v['IDR'],
-                                "Prediction": "💧 LLPS Potential"
-                            })
+    #         if not high_idr_nodes:
+    #             st.warning("当前图谱数据中未包含预计算的 IDR 信息。请在 Colab 中运行 '批量计算' 并保存到 CSV。")
+    #         else:
+    #             st.write(f"发现 {len(high_idr_nodes)} 个高无序蛋白。正在两两配对...")
+    #             # 简单的两两配对逻辑 (取前 50 个演示)
+    #             cands = sorted(high_idr_nodes, key=lambda x:x['IDR'], reverse=True)[:50]
+    #             pairs = []
+    #             for i in range(len(cands)):
+    #                 for j in range(i+1, len(cands)):
+    #                     u, v = cands[i], cands[j]
+    #                     # 如果没有已知互作，且 AI 分数低，但都有高 IDR -> 可能是 LLPS
+    #                     if not G.has_edge(u['Gene'], v['Gene']):
+    #                         pairs.append({
+    #                             "Protein A": u['Gene'], "IDR A": u['IDR'],
+    #                             "Protein B": v['Gene'], "IDR B": v['IDR'],
+    #                             "Prediction": "💧 LLPS Potential"
+    #                         })
                 
-                if pairs:
-                    st.dataframe(pd.DataFrame(pairs))
-                else:
-                    st.info("未发现显著配对。")
+    #             if pairs:
+    #                 st.dataframe(pd.DataFrame(pairs))
+    #             else:
+    #                 st.info("未发现显著配对。")
