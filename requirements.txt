@@ -6,5 +6,5 @@ metapredict
 biopython
 scipy
 community
-python-Louvain
+python-louvain
 gdown
