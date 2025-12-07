@@ -6,16 +6,14 @@ import pickle
 from pyvis.network import Network
 import community.community_louvain as community_louvain
 import streamlit.components.v1 as components
-
-import gdown # 需要在 requirements.txt 里加一行 gdown
-
+import gdown 
 
 # ==========================================
 # ⚙️ 页面配置与缓存
 # ==========================================
 st.set_page_config(page_title="BioGraph 整合分析平台", layout="wide", page_icon="🧬")
 
-# 路径设置 (根据你的实际文件位置修改)
+# 路径设置
 DATA_FILE = "data/master_graph_data.csv.gz"
 CACHE_DIR = "checkpoints"
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -25,19 +23,30 @@ def load_graph_data():
     """
     核心数据加载函数：只在启动时运行一次，之后会缓存。
     """
+    # 1. 如果文件不存在，从 Google Drive 下载
     if not os.path.exists(DATA_FILE):
-        # return None, None
-	# file_id = 'XXXXX_YOUR_FILE_ID_XXXXX' 
+        # 确保 data 文件夹存在
+        os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
+        
+        # 你的 Google Drive 文件 ID
         file_id = '1tM-n8EOVCPNLg9j9JfoIgg-SFYSML5XM' 
         url = f'https://drive.google.com/uc?id={file_id}'
-        gdown.download(url, file_path, quiet=False)
+        
+        # 显示下载提示
+        with st.spinner('正在从云端下载数据 (首次运行较慢)...'):
+            # --- 修正点在这里：把 file_path 改为 DATA_FILE ---
+            gdown.download(url, DATA_FILE, quiet=False)
 
-
+    # 2. 读取数据
     with st.spinner('正在加载核心图谱数据 (这可能需要几秒钟)...'):
-        # 1. 读取 CSV
+        # 检查下载是否成功
+        if not os.path.exists(DATA_FILE):
+            return None, None
+
+        # 读取 CSV (支持 .gz 自动解压)
         df = pd.read_csv(DATA_FILE)
         
-        # 2. 构建 NetworkX 图
+        # 构建 NetworkX 图
         G = nx.Graph()
         for _, row in df.iterrows():
             s, t = row['Source'], row['Target']
@@ -47,7 +56,7 @@ def load_graph_data():
             loc_s = row.get('Source_Loc', 'Unknown')
             dom_s = row.get('Source_Domain', '')
             
-            # 添加节点属性 (仅示例，可按需补充)
+            # 添加节点属性
             G.add_node(s, loc=loc_s, dom=dom_s)
             G.add_node(t, loc=row.get('Target_Loc', 'Unknown'), dom=row.get('Target_Domain', ''))
             
@@ -64,7 +73,7 @@ def load_graph_data():
 G, master_df = load_graph_data()
 
 if G is None:
-    st.error(f"❌ 未找到数据文件: {DATA_FILE}。请确保 CSV 文件在 data 目录下。")
+    st.error(f"❌ 数据加载失败或文件未找到: {DATA_FILE}。请检查 Google Drive 链接权限是否公开。")
     st.stop()
 
 # 获取所有基因列表供下拉框使用
@@ -97,11 +106,13 @@ if module == "🕵️‍♂️ 深度蛋白侦探":
 
     col1, col2 = st.columns(2)
     with col1:
-        target = st.selectbox("选择目标蛋白:", ALL_GENES, index=ALL_GENES.index('TP53') if 'TP53' in ALL_GENES else 0)
+        # 防止列表为空导致报错
+        default_gene = 'TP53' if 'TP53' in ALL_GENES else ALL_GENES[0] if ALL_GENES else ""
+        target = st.selectbox("选择目标蛋白:", ALL_GENES, index=ALL_GENES.index(default_gene) if default_gene in ALL_GENES else 0)
     with col2:
         min_score = st.slider("最低 AI 分数阈值:", 0.0, 1.0, 0.5, 0.05)
 
-    if st.button("开始侦查"):
+    if st.button("开始侦查") and target:
         neighbors = []
         for n in G.neighbors(target):
             edge = G[target][n]
@@ -128,9 +139,9 @@ elif module == "🗺️ 定向路径挖掘":
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        start_gene = st.selectbox("起点 (Start):", ALL_GENES, index=0)
+        start_gene = st.selectbox("起点 (Start):", ALL_GENES, index=0 if ALL_GENES else 0)
     with col2:
-        end_gene = st.selectbox("终点 (End):", ALL_GENES, index=1)
+        end_gene = st.selectbox("终点 (End):", ALL_GENES, index=1 if len(ALL_GENES)>1 else 0)
     with col3:
         via_gene = st.multiselect("必经点 (可选):", ALL_GENES)
 
@@ -164,6 +175,8 @@ elif module == "🗺️ 定向路径挖掘":
             
         except nx.NetworkXNoPath:
             st.error("❌ 两点之间无通路。")
+        except Exception as e:
+            st.error(f"发生错误: {e}")
 
 # ==========================================
 # 🧩 模块 3: 全景互作分析
@@ -253,13 +266,12 @@ elif module == "💧 IDR/LLPS 分析":
     gene_input = st.text_input("输入基因名:", "FUS")
     
     if st.button("计算 IDR"):
-        # 简单的 metapredict 调用 (需确保已安装)
         try:
             import metapredict as meta
             import requests
             
             with st.spinner("正在获取序列并计算..."):
-                # 获取序列 (简化版 API 调用)
+                # 获取序列
                 url = "https://rest.uniprot.org/uniprotkb/search"
                 params = {'query': f"gene_exact:{gene_input} AND reviewed:true AND organism_id:9606", 'format': 'json', 'size': 1}
                 r = requests.get(url, params=params).json()
@@ -276,13 +288,14 @@ elif module == "💧 IDR/LLPS 分析":
                     else:
                         st.info("🪨 该蛋白结构较为刚性。")
                         
-                    # 绘制简单的无序图 (可选)
                     st.line_chart(scores)
                 else:
                     st.error("未找到该基因的 UniProt 数据。")
                     
         except ImportError:
-            st.warning("请在后台安装 metapredict 库以启用此功能。")
+            st.warning("请在 requirements.txt 中添加 metapredict。")
+        except Exception as e:
+            st.error(f"计算出错: {e}")
 
 # ==========================================
 # 🧩 模块 6: 可视化图谱 (Pyvis)
@@ -292,9 +305,7 @@ elif module == "🕸️ 可视化图谱":
     center_node = st.selectbox("中心节点:", ALL_GENES)
     
     if st.button("生成图谱"):
-        # 提取子图 (中心节点 + 邻居)
         neighbors = list(G.neighbors(center_node))
-        # 限制数量防止浏览器卡死
         if len(neighbors) > 50:
             neighbors = neighbors[:50]
             st.warning("邻居过多，仅展示前 50 个。")
@@ -302,7 +313,6 @@ elif module == "🕸️ 可视化图谱":
         sub_nodes = neighbors + [center_node]
         subG = G.subgraph(sub_nodes)
         
-        # Pyvis 设置
         net = Network(height="600px", width="100%", bgcolor="#222222", font_color="white")
         
         for n in subG.nodes():
@@ -314,7 +324,6 @@ elif module == "🕸️ 可视化图谱":
             color = "#7bed9f" if edge.get('known') else "#ffa502"
             net.add_edge(u, v, color=color, width=2 if edge.get('known') else 1)
             
-        # 保存并读取 HTML
         tmp_path = "tmp_network.html"
         net.save_graph(tmp_path)
         
