@@ -8,3 +8,11 @@ scipy
 community
 python-louvain
 gdown
+numpy
+matplotlib
+seaborn
+plotly
+scikit-learn
+networkx
+umap-learn
+requests
