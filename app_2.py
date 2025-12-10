@@ -11,31 +11,29 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 
 # ==========================================
-# 1. 页面基础配置
+# 1. 页面配置
 # ==========================================
 st.set_page_config(
-    page_title="BioGraph v5.0: Interactive Analytics",
+    page_title="BioGraph v4.5: Stable Interactive",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("🧬 BioGraph v5.0: 交互式蛋白质组学全景平台")
+st.title("🧬 BioGraph v4.5: 交互式蛋白质组学全景平台")
 st.markdown("""
-**最新升级 (v5.0)**：
-1. **网络图谱交互化**：功能模块网络现在支持缩放、悬停查看节点详情。
-2. **动态富集热图**：支持自定义筛选关键词类别，实时生成热图分析。
+**稳定增强版**：基于 v4.0 内核。
+修复了网络图报错，并集成了交互式网络 (Plotly) 与动态热图分析。
 """)
 
 # ==========================================
-# 2. 数据加载与智能预处理
+# 2. 数据加载与预处理 (沿用 v4.0 的高容错逻辑)
 # ==========================================
 @st.cache_data
 def load_data():
     try:
-        # 读取压缩数据
         df = pd.read_csv("final_analysis_result.csv.gz", compression='gzip')
         
-        # --- A. 基础清洗 ---
+        # 基础清洗
         str_cols = ['cc_function', 'Gene_Symbol', 'N_Term_AA', 'Processing_Type']
         for col in str_cols:
             if col in df.columns:
@@ -44,9 +42,7 @@ def load_data():
         if 'Real_Protein_HalfLife_Hours' in df.columns:
             df['Real_Protein_HalfLife_Hours'] = df['Real_Protein_HalfLife_Hours'].fillna(0)
             
-        # --- B. 智能标签补全 ---
-        
-        # 1. 细胞位置 (Auto_Location)
+        # 标签补全
         if 'Auto_Location' not in df.columns and 'cc_function' in df.columns:
             def get_loc(text):
                 t = str(text).lower()
@@ -60,21 +56,15 @@ def load_data():
                 return 'Cytoplasm/Other'
             df['Auto_Location'] = df['cc_function'].apply(get_loc)
 
-        # 2. 癌症相关性
         if 'Is_Cancer' not in df.columns and 'cc_function' in df.columns:
              df['Is_Cancer'] = df['cc_function'].str.contains('cancer|tumor', case=False).map({True:'Yes', False:'No'})
 
-        # 3. 稳定性分级
         if 'Stability_Level' not in df.columns and 'Real_Protein_HalfLife_Hours' in df.columns:
             df['Stability_Level'] = pd.cut(df['Real_Protein_HalfLife_Hours'], 
                                            bins=[-1, 10, 50, 100000], 
                                            labels=['Short (<10h)', 'Medium', 'Long (>50h)']).astype(str)
 
         return df
-        
-    except FileNotFoundError:
-        st.error("❌ 未找到数据文件 `final_analysis_result.csv.gz`。请上传至仓库根目录。")
-        return pd.DataFrame()
     except Exception as e:
         st.error(f"❌ 数据读取错误: {e}")
         return pd.DataFrame()
@@ -83,7 +73,7 @@ df_main = load_data()
 if df_main.empty: st.stop()
 
 # ==========================================
-# 3. 辅助计算：PCA Loadings
+# 3. PCA Loadings 计算
 # ==========================================
 @st.cache_data
 def calculate_pca_loadings(df):
@@ -101,7 +91,7 @@ def calculate_pca_loadings(df):
 df_loadings, used_features = calculate_pca_loadings(df_main)
 
 # ==========================================
-# 4. 侧边栏：全局过滤器
+# 4. 侧边栏
 # ==========================================
 st.sidebar.header("🔍 全局筛选")
 if 'Cluster' in df_main.columns:
@@ -120,12 +110,12 @@ st.sidebar.info(f"展示: {len(df_filtered)} 条数据")
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🌌 全景流形 (UMAP)", 
     "🔍 蛋白雷达 (Detail)", 
-    "🕸️ 交互网络 (Interactive Network)", 
+    "🕸️ 交互网络 (Interactive)", 
     "📉 PCA 解密",
-    "🧪 动态富集 (Dynamic Heatmap)"
+    "🧪 动态富集 (Heatmap)"
 ])
 
-# --- Tab 1: 全景流形图 ---
+# --- Tab 1: 全景流形 (保持 v4 的 Plotly 实现) ---
 with tab1:
     col1, col2 = st.columns([1, 4])
     with col1:
@@ -151,9 +141,9 @@ with tab1:
                 ))
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("缺少 UMAP 坐标数据。")
+            st.warning("缺少 UMAP 坐标。")
 
-# --- Tab 2: 详情雷达 ---
+# --- Tab 2: 详情雷达 (保持 v4 的静态图，最稳定) ---
 with tab2:
     all_genes = sorted(df_main['Gene_Symbol'].unique())
     default_idx = all_genes.index(sidebar_search) if sidebar_search and sidebar_search in all_genes else 0
@@ -177,10 +167,10 @@ with tab2:
             st.metric("真实半衰期", f"{row.get('Real_Protein_HalfLife_Hours', 0):.1f} h")
             st.info(row.get('cc_function', 'No description.'))
 
-# --- Tab 3: 交互式网络图谱 (Plotly版) ---
+# --- Tab 3: 交互式网络 (修复 KeyError 版) ---
 with tab3:
     st.markdown("### 🕸️ 交互式功能共现网络")
-    st.caption("选择模块后，可缩放、拖拽，鼠标悬停查看节点详情。")
+    st.caption("基于半衰期相似性构建网络。支持缩放、悬停查看详情。")
     
     modules = [
         'Mitochondria (线粒体)', 'Nucleus (细胞核)', 'Plasma Membrane (细胞膜)', 
@@ -192,33 +182,34 @@ with tab3:
     keyword = selected_module.split(' (')[0]
     
     if keyword:
-        # 1. 筛选与去重
         subset = df_main[df_main['cc_function'].str.contains(keyword, case=False, na=False)]
-        subset = subset.drop_duplicates(subset=['Gene_Symbol']).head(80) # 限制节点数
+        subset = subset.drop_duplicates(subset=['Gene_Symbol']).head(80)
         
         if len(subset) > 2:
-            # 2. 构建 NetworkX 图
             G = nx.Graph()
-            genes = subset['Gene_Symbol'].tolist()
-            hls = subset['Real_Protein_HalfLife_Hours'].tolist()
-            funcs = subset['cc_function'].astype(str).str[:50] + "..." # 截断描述
             
-            for i in range(len(genes)):
-                G.add_node(genes[i], hl=hls[i], desc=funcs[i])
-                for j in range(i+1, len(genes)):
-                    if abs(hls[i] - hls[j]) < 2.0:
-                        G.add_edge(genes[i], genes[j])
+            # === 关键修复：全部转换为 list，避免索引对不上导致的 KeyError ===
+            genes_list = subset['Gene_Symbol'].tolist()
+            hls_list = subset['Real_Protein_HalfLife_Hours'].tolist()
+            funcs_list = subset['cc_function'].astype(str).tolist()
             
-            # 3. 计算布局
+            for i in range(len(genes_list)):
+                # 将属性写入节点
+                G.add_node(genes_list[i], hl=hls_list[i], desc=funcs_list[i])
+                for j in range(i+1, len(genes_list)):
+                    if abs(hls_list[i] - hls_list[j]) < 2.0:
+                        G.add_edge(genes_list[i], genes_list[j])
+            
+            # 布局
             pos = nx.spring_layout(G, k=0.3, seed=42)
             
-            # 4. 转换为 Plotly 数据
+            # Plotly 绘图：边
             edge_x = []
             edge_y = []
             for edge in G.edges():
                 x0, y0 = pos[edge[0]]
                 x1, y1 = pos[edge[1]]
-                edge_x.extend([x0, x1, None]) # None 用于断开线段
+                edge_x.extend([x0, x1, None])
                 edge_y.extend([y0, y1, None])
 
             edge_trace = go.Scatter(
@@ -227,6 +218,7 @@ with tab3:
                 hoverinfo='none',
                 mode='lines')
 
+            # Plotly 绘图：点
             node_x = []
             node_y = []
             node_text = []
@@ -236,9 +228,11 @@ with tab3:
                 x, y = pos[node]
                 node_x.append(x)
                 node_y.append(y)
-                # 悬停信息
+                
+                # 获取属性
                 hl = G.nodes[node]['hl']
-                desc = G.nodes[node]['desc']
+                desc = G.nodes[node]['desc'][:100] + "..." # 截断长文本
+                
                 node_text.append(f"<b>{node}</b><br>HL: {hl:.1f}h<br>{desc}")
                 node_color.append(hl)
 
@@ -250,23 +244,14 @@ with tab3:
                 marker=dict(
                     showscale=True,
                     colorscale='Viridis',
-                    reversescale=False,
                     color=node_color,
                     size=15,
-                    colorbar=dict(
-                        thickness=15,
-                        title='Half-Life (h)',
-                        xanchor='left',
-                        titleside='right'
-                    ),
-                    line_width=1,
-                    line_color='white'))
+                    colorbar=dict(title='Half-Life (h)'),
+                    line_width=1))
 
-            # 5. 渲染图表
             fig_net = go.Figure(data=[edge_trace, node_trace],
                          layout=go.Layout(
                             title=f"Network: {keyword}",
-                            titlefont_size=16,
                             showlegend=False,
                             hovermode='closest',
                             margin=dict(b=20,l=5,r=5,t=40),
@@ -275,10 +260,7 @@ with tab3:
                             height=600,
                             template='plotly_white'
                          ))
-            
             st.plotly_chart(fig_net, use_container_width=True)
-            st.caption(f"展示节点: {len(genes)} | 颜色代表半衰期 | 鼠标悬停查看详细信息")
-
         else:
             st.warning("相关蛋白数量过少，无法构建网络。")
 
@@ -295,79 +277,45 @@ with tab4:
                 ax.text(df_loadings.iloc[i,0]*1.2, df_loadings.iloc[i,1]*1.2, f)
             st.pyplot(fig_l)
 
-# --- Tab 5: 动态富集热图 (升级版) ---
+# --- Tab 5: 动态富集 (升级为 Plotly 交互热图) ---
 with tab5:
     st.markdown("### 🧪 动态关键词富集分析")
-    st.caption("选择感兴趣的关键词类别，系统将自动计算这些词在不同 Cluster 中的出现频率。")
     
-    # 1. 定义大字典
     FULL_DICT = {
-        'Subcellular Location (细胞位置)': ['mitochondrion', 'nucleus', 'membrane', 'cytoplasm', 'secreted', 'golgi', 'ER', 'lysosome'],
-        'Molecular Function (分子功能)': ['kinase', 'transcription', 'transport', 'metabolism', 'receptor', 'chaperone', 'ubiquitin'],
-        'Biological Process (生物过程)': ['cell cycle', 'apoptosis', 'immune', 'signaling', 'translation', 'dna repair'],
-        'Disease Relevance (疾病相关)': ['cancer', 'tumor', 'disease', 'syndrome']
+        'Location': ['mitochondrion', 'nucleus', 'membrane', 'cytoplasm', 'secreted', 'golgi', 'ER'],
+        'Function': ['kinase', 'transcription', 'transport', 'metabolism', 'receptor', 'chaperone'],
+        'Process': ['cell cycle', 'apoptosis', 'immune', 'signaling', 'dna repair']
     }
     
-    # 2. 交互式选择框
-    selected_categories = st.multiselect(
-        "第一步：选择要分析的关键词类别",
-        options=list(FULL_DICT.keys()),
-        default=['Subcellular Location (细胞位置)', 'Molecular Function (分子功能)']
-    )
+    selected_cats = st.multiselect("选择分析维度:", list(FULL_DICT.keys()), default=['Location', 'Function'])
     
-    # 3. 动态生成关键词列表
-    target_keywords = []
-    for cat in selected_categories:
-        target_keywords.extend(FULL_DICT[cat])
+    target_kws = []
+    for cat in selected_cats:
+        target_kws.extend(FULL_DICT[cat])
     
-    if not target_keywords:
-        st.warning("请至少选择一个类别以生成热图。")
-    elif 'Cluster' in df_main.columns:
-        # 4. 计算热图矩阵
+    if target_kws and 'Cluster' in df_main.columns:
         clusters = sorted(df_main['Cluster'].unique())
         heatmap_data = []
         
-        for k in target_keywords:
+        for k in target_kws:
             row_data = []
             for c in clusters:
                 sub = df_main[df_main['Cluster'] == c]
-                if len(sub) > 0:
-                    # 计算百分比
-                    ratio = sub['cc_function'].str.contains(k, case=False).mean() * 100
-                else:
-                    ratio = 0
+                ratio = sub['cc_function'].str.contains(k, case=False).mean() * 100 if len(sub)>0 else 0
                 row_data.append(ratio)
             heatmap_data.append(row_data)
             
-        df_heatmap = pd.DataFrame(heatmap_data, index=target_keywords, columns=clusters)
+        df_hm = pd.DataFrame(heatmap_data, index=target_kws, columns=[f"Cluster {c}" for c in clusters])
         
-        # 5. 使用 Plotly 绘制交互式热图
         fig_h = px.imshow(
-            df_heatmap,
-            labels=dict(x="Cluster ID", y="Keyword", color="Percentage (%)"),
-            x=[f"Cluster {c}" for c in clusters],
-            y=target_keywords,
+            df_hm,
+            labels=dict(x="Cluster", y="Keyword", color="%"),
             color_continuous_scale='YlGnBu',
             aspect="auto",
-            title="Keyword Enrichment Heatmap (Interactive)"
+            title="Keyword Enrichment (%)"
         )
-        # 添加数值标签
-        fig_h.update_traces(text=df_heatmap.round(1).values, texttemplate="%{text}%")
-        fig_h.update_xaxes(side="bottom")
-        fig_h.update_layout(height=max(500, len(target_keywords)*30)) # 动态高度
-        
+        fig_h.update_traces(text=df_hm.round(1).values, texttemplate="%{text}%")
         st.plotly_chart(fig_h, use_container_width=True)
-    else:
-        st.error("数据中缺少 Cluster 列。")
 
-# 底部
 st.markdown("---")
-col_footer1, col_footer2 = st.columns([3, 1])
-with col_footer1: st.caption("BioGraph v5.0 | Powered by Streamlit")
-with col_footer2:
-    app_url = "https://biographapp-wsncnqwhkapbkwqudbkhqp.streamlit.app"
-    st.markdown(f"""
-        <a href="{app_url}">
-            <img src="https://hits.seeyoufarm.com/api/count/incr/badge.svg?url={app_url}&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=Visitors&edge_flat=false"/>
-        </a>
-        """, unsafe_allow_html=True)
+st.caption("BioGraph v4.5 Stable | Powered by Streamlit")
