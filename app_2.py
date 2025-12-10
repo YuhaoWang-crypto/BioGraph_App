@@ -14,19 +14,20 @@ from sklearn.decomposition import PCA
 # 1. 页面配置
 # ==========================================
 st.set_page_config(
-    page_title="BioGraph v4.5: Stable Interactive",
+    page_title="BioGraph v4.6: Protein Explorer",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("🧬 BioGraph v4.5: 交互式蛋白质组学全景平台")
+st.title("🧬 BioGraph v4.6: 蛋白质组学全景分析平台")
 st.markdown("""
-**稳定增强版**：基于 v4.0 内核。
-修复了网络图报错，并集成了交互式网络 (Plotly) 与动态热图分析。
+**版本更新 (v4.6)**：
+1. 修复了详情页 (Tab 2) 缺失 mRNA 数据的问题。
+2. 增加了对生物学指标（mRNA单位、半衰期）的详细解释。
 """)
 
 # ==========================================
-# 2. 数据加载与预处理 (沿用 v4.0 的高容错逻辑)
+# 2. 数据加载
 # ==========================================
 @st.cache_data
 def load_data():
@@ -39,8 +40,11 @@ def load_data():
             if col in df.columns:
                 df[col] = df[col].fillna('Unknown')
         
-        if 'Real_Protein_HalfLife_Hours' in df.columns:
-            df['Real_Protein_HalfLife_Hours'] = df['Real_Protein_HalfLife_Hours'].fillna(0)
+        # 数值清洗
+        num_cols = ['Real_Protein_HalfLife_Hours', 'mRNA_Expression']
+        for col in num_cols:
+            if col in df.columns:
+                df[col] = df[col].fillna(0)
             
         # 标签补全
         if 'Auto_Location' not in df.columns and 'cc_function' in df.columns:
@@ -73,7 +77,7 @@ df_main = load_data()
 if df_main.empty: st.stop()
 
 # ==========================================
-# 3. PCA Loadings 计算
+# 3. PCA Loadings
 # ==========================================
 @st.cache_data
 def calculate_pca_loadings(df):
@@ -115,7 +119,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🧪 动态富集 (Heatmap)"
 ])
 
-# --- Tab 1: 全景流形 (保持 v4 的 Plotly 实现) ---
+# --- Tab 1: 全景流形 ---
 with tab1:
     col1, col2 = st.columns([1, 4])
     with col1:
@@ -143,7 +147,7 @@ with tab1:
         else:
             st.warning("缺少 UMAP 坐标。")
 
-# --- Tab 2: 详情雷达 (保持 v4 的静态图，最稳定) ---
+# --- Tab 2: 详情雷达 (已增加 mRNA 数据) ---
 with tab2:
     all_genes = sorted(df_main['Gene_Symbol'].unique())
     default_idx = all_genes.index(sidebar_search) if sidebar_search and sidebar_search in all_genes else 0
@@ -164,13 +168,36 @@ with tab2:
         with c2:
             st.subheader(f"🧬 {selected_gene}")
             st.write(f"**Cluster:** {row.get('Cluster', 'N/A')} | **Loc:** {row.get('Auto_Location', 'N/A')}")
-            st.metric("真实半衰期", f"{row.get('Real_Protein_HalfLife_Hours', 0):.1f} h")
+            
+            # === 新增：多列指标展示 ===
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.metric("蛋白半衰期", f"{row.get('Real_Protein_HalfLife_Hours', 0):.1f} h")
+            with m2:
+                # 显示 mRNA 数据
+                val = row.get('mRNA_Expression', 0)
+                st.metric("mRNA 表达量", f"{val:.2f}")
+            with m3:
+                st.metric("N端氨基酸", f"{row.get('N_Term_AA', 'N/A')}")
+            
+            # === 新增：数据解释折叠框 ===
+            with st.expander("📚 数据指标说明 (单位与含义)"):
+                st.markdown("""
+                *   **mRNA 表达量**: 
+                    *   **单位**: 相对丰度 (Log2 Transformed RPKM/TPM)。
+                    *   **含义**: 数值越高，代表基因转录越活跃。高表达量通常见于管家基因（如核糖体）。
+                *   **蛋白半衰期**:
+                    *   **单位**: 小时 (Hours)。
+                    *   **含义**: 蛋白质降解一半所需的时间。短半衰期 (<10h) 意味着该蛋白受到严格调控；长半衰期 (>50h) 意味着它是稳定的结构成分。
+                *   **N端氨基酸**:
+                    *   **含义**: 决定蛋白降解速率的关键信号 (N-end Rule)。
+                """)
+                
             st.info(row.get('cc_function', 'No description.'))
 
-# --- Tab 3: 交互式网络 (修复 KeyError 版) ---
+# --- Tab 3: 交互式网络 ---
 with tab3:
     st.markdown("### 🕸️ 交互式功能共现网络")
-    st.caption("基于半衰期相似性构建网络。支持缩放、悬停查看详情。")
     
     modules = [
         'Mitochondria (线粒体)', 'Nucleus (细胞核)', 'Plasma Membrane (细胞膜)', 
@@ -187,23 +214,18 @@ with tab3:
         
         if len(subset) > 2:
             G = nx.Graph()
-            
-            # === 关键修复：全部转换为 list，避免索引对不上导致的 KeyError ===
             genes_list = subset['Gene_Symbol'].tolist()
             hls_list = subset['Real_Protein_HalfLife_Hours'].tolist()
             funcs_list = subset['cc_function'].astype(str).tolist()
             
             for i in range(len(genes_list)):
-                # 将属性写入节点
                 G.add_node(genes_list[i], hl=hls_list[i], desc=funcs_list[i])
                 for j in range(i+1, len(genes_list)):
                     if abs(hls_list[i] - hls_list[j]) < 2.0:
                         G.add_edge(genes_list[i], genes_list[j])
             
-            # 布局
             pos = nx.spring_layout(G, k=0.3, seed=42)
             
-            # Plotly 绘图：边
             edge_x = []
             edge_y = []
             for edge in G.edges():
@@ -213,12 +235,9 @@ with tab3:
                 edge_y.extend([y0, y1, None])
 
             edge_trace = go.Scatter(
-                x=edge_x, y=edge_y,
-                line=dict(width=0.5, color='#888'),
-                hoverinfo='none',
-                mode='lines')
+                x=edge_x, y=edge_y, line=dict(width=0.5, color='#888'),
+                hoverinfo='none', mode='lines')
 
-            # Plotly 绘图：点
             node_x = []
             node_y = []
             node_text = []
@@ -228,38 +247,25 @@ with tab3:
                 x, y = pos[node]
                 node_x.append(x)
                 node_y.append(y)
-                
-                # 获取属性
                 hl = G.nodes[node]['hl']
-                desc = G.nodes[node]['desc'][:100] + "..." # 截断长文本
-                
+                desc = G.nodes[node]['desc'][:100] + "..."
                 node_text.append(f"<b>{node}</b><br>HL: {hl:.1f}h<br>{desc}")
                 node_color.append(hl)
 
             node_trace = go.Scatter(
-                x=node_x, y=node_y,
-                mode='markers',
-                hoverinfo='text',
+                x=node_x, y=node_y, mode='markers', hoverinfo='text',
                 text=node_text,
                 marker=dict(
-                    showscale=True,
-                    colorscale='Viridis',
-                    color=node_color,
-                    size=15,
-                    colorbar=dict(title='Half-Life (h)'),
-                    line_width=1))
+                    showscale=True, colorscale='Viridis', color=node_color, size=15,
+                    colorbar=dict(title='Half-Life (h)'), line_width=1))
 
             fig_net = go.Figure(data=[edge_trace, node_trace],
                          layout=go.Layout(
-                            title=f"Network: {keyword}",
-                            showlegend=False,
-                            hovermode='closest',
-                            margin=dict(b=20,l=5,r=5,t=40),
+                            title=f"Network: {keyword}", showlegend=False,
+                            hovermode='closest', margin=dict(b=20,l=5,r=5,t=40),
                             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                             yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                            height=600,
-                            template='plotly_white'
-                         ))
+                            height=600, template='plotly_white'))
             st.plotly_chart(fig_net, use_container_width=True)
         else:
             st.warning("相关蛋白数量过少，无法构建网络。")
@@ -277,26 +283,21 @@ with tab4:
                 ax.text(df_loadings.iloc[i,0]*1.2, df_loadings.iloc[i,1]*1.2, f)
             st.pyplot(fig_l)
 
-# --- Tab 5: 动态富集 (升级为 Plotly 交互热图) ---
+# --- Tab 5: 动态富集 ---
 with tab5:
     st.markdown("### 🧪 动态关键词富集分析")
-    
     FULL_DICT = {
         'Location': ['mitochondrion', 'nucleus', 'membrane', 'cytoplasm', 'secreted', 'golgi', 'ER'],
         'Function': ['kinase', 'transcription', 'transport', 'metabolism', 'receptor', 'chaperone'],
         'Process': ['cell cycle', 'apoptosis', 'immune', 'signaling', 'dna repair']
     }
-    
     selected_cats = st.multiselect("选择分析维度:", list(FULL_DICT.keys()), default=['Location', 'Function'])
-    
     target_kws = []
-    for cat in selected_cats:
-        target_kws.extend(FULL_DICT[cat])
+    for cat in selected_cats: target_kws.extend(FULL_DICT[cat])
     
     if target_kws and 'Cluster' in df_main.columns:
         clusters = sorted(df_main['Cluster'].unique())
         heatmap_data = []
-        
         for k in target_kws:
             row_data = []
             for c in clusters:
@@ -304,18 +305,12 @@ with tab5:
                 ratio = sub['cc_function'].str.contains(k, case=False).mean() * 100 if len(sub)>0 else 0
                 row_data.append(ratio)
             heatmap_data.append(row_data)
-            
-        df_hm = pd.DataFrame(heatmap_data, index=target_kws, columns=[f"Cluster {c}" for c in clusters])
         
-        fig_h = px.imshow(
-            df_hm,
-            labels=dict(x="Cluster", y="Keyword", color="%"),
-            color_continuous_scale='YlGnBu',
-            aspect="auto",
-            title="Keyword Enrichment (%)"
-        )
+        df_hm = pd.DataFrame(heatmap_data, index=target_kws, columns=[f"Cluster {c}" for c in clusters])
+        fig_h = px.imshow(df_hm, labels=dict(x="Cluster", y="Keyword", color="%"),
+                          color_continuous_scale='YlGnBu', aspect="auto")
         fig_h.update_traces(text=df_hm.round(1).values, texttemplate="%{text}%")
         st.plotly_chart(fig_h, use_container_width=True)
 
 st.markdown("---")
-st.caption("BioGraph v4.5 Stable | Powered by Streamlit")
+st.caption("BioGraph v4.6 Stable | Powered by Streamlit")
