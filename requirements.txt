@@ -16,3 +16,10 @@ scikit-learn
 networkx
 umap-learn
 requests
+streamlit
+pandas
+gseapy
+requests
+chembl_webresource_client
+rdkit
+Pillow
