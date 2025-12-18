@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import gseapy as gp
 import requests
-from chembl_webresource_client.new_client import new_client
 from rdkit import Chem
 from rdkit.Chem import Draw
 from PIL import Image
@@ -11,31 +10,26 @@ import io
 # --- 页面配置 ---
 st.set_page_config(page_title="PPI & Drug Discovery Portal", layout="wide")
 
-st.title("🧬 PPI & 小分子抑制剂实验设计平台")
-st.markdown("通过通路搜索靶点，实时挖掘蛋白质相互作用网络及其潜在小分子抑制剂。")
-
-# --- 初始化 ChEMBL 客户端 ---
-target_api = new_client.target
-activity_api = new_client.activity
+st.title("🧬 PPI & 小分子抑制剂实验设计平台 (稳定版)")
+st.markdown("该版本直接连接 ChEMBL REST API，避开了客户端连接错误。")
 
 # --- 核心功能函数 ---
 
 @st.cache_data
 def get_libraries():
     """获取全量通路库名称"""
-    all_libs = gp.get_library_name()
-    return [l for l in all_libs if any(x in l for x in ['KEGG', 'Reactome', 'GO_Biological_Process'])]
+    try:
+        all_libs = gp.get_library_name()
+        return [l for l in all_libs if any(x in l for x in ['KEGG', 'Reactome', 'GO_Biological_Process'])]
+    except:
+        return ["KEGG_2021_Human", "Reactome_2022_Human"]
 
 def get_ppi_partners(gene_symbol, limit=5):
     """从 STRING API 获取 PPI 伙伴"""
-    string_api_url = "https://string-db.org/api/json/network"
-    params = {
-        "identifiers": gene_symbol,
-        "species": 9606,  # Human
-        "limit": limit
-    }
+    url = "https://string-db.org/api/json/network"
+    params = {"identifiers": gene_symbol, "species": 9606, "limit": limit}
     try:
-        res = requests.get(string_api_url, params=params)
+        res = requests.get(url, params=params)
         data = res.json()
         partners = []
         for item in data:
@@ -45,54 +39,66 @@ def get_ppi_partners(gene_symbol, limit=5):
     except:
         return []
 
-def get_inhibitors(target_gene, pchembl_min=6.0):
-    """从 ChEMBL 获取抑制剂数据"""
+def get_inhibitors_rest(target_gene, pchembl_min=6.0):
+    """使用 REST API 直接抓取 ChEMBL 抑制剂数据 (更稳定)"""
+    # 1. 搜索靶点
+    search_url = f"https://www.ebi.ac.uk/chembl/api/data/target/search.json"
+    search_params = {"q": target_gene}
     try:
-        # 搜索靶点
-        targets = target_api.search(target_gene).filter(organism="Homo sapiens", target_type="SINGLE PROTEIN")
-        if not targets: return pd.DataFrame()
+        res = requests.get(search_url, params=search_params, timeout=10)
+        targets = res.json().get('targets', [])
         
-        target_id = targets[0]['target_chembl_id']
+        # 筛选人类单蛋白靶点
+        target_id = None
+        for t in targets:
+            if t.get('organism') == "Homo sapiens" and t.get('target_type') == "SINGLE PROTEIN":
+                target_id = t.get('target_chembl_id')
+                break
         
-        # 抓取活性数据 (Top 10)
-        activities = activity_api.filter(
-            target_chembl_id=target_id, 
-            pchembl_value__gte=pchembl_min,
-            standard_type="IC50"
-        ).order_by('-pchembl_value')[:10]
+        if not target_id: return pd.DataFrame()
         
-        df = pd.DataFrame(list(activities))
-        if not df.empty:
-            df['target_gene'] = target_gene
-            return df[['target_gene', 'molecule_chembl_id', 'pchembl_value', 'canonical_smiles']]
-    except:
-        pass
-    return pd.DataFrame()
+        # 2. 抓取活性数据
+        activity_url = f"https://www.ebi.ac.uk/chembl/api/data/activity.json"
+        activity_params = {
+            "target_chembl_id": target_id,
+            "pchembl_value__gte": pchembl_min,
+            "standard_type": "IC50",
+            "order_by": "-pchembl_value",
+            "limit": 10
+        }
+        res_act = requests.get(activity_url, params=activity_params, timeout=10)
+        activities = res_act.json().get('activities', [])
+        
+        if not activities: return pd.DataFrame()
+        
+        df = pd.DataFrame(activities)
+        df['target_gene'] = target_gene
+        return df[['target_gene', 'molecule_chembl_id', 'pchembl_value', 'canonical_smiles']]
+    except Exception as e:
+        # st.error(f"API Error for {target_gene}: {e}")
+        return pd.DataFrame()
 
 # --- 侧边栏：通路探索 ---
 st.sidebar.header("第一步：通路搜索")
 libs = get_libraries()
 selected_lib = st.sidebar.selectbox("选择通路库", libs, index=0)
 
-# 加载选中库的所有通路
 @st.cache_data
 def load_pathway_data(lib_name):
     return gp.get_library(lib_name)
 
 pathway_dict = load_pathway_data(selected_lib)
 pathway_list = sorted(list(pathway_dict.keys()))
-
 selected_pathway = st.sidebar.selectbox("选择具体通路", pathway_list)
 
 if selected_pathway:
     genes = sorted(pathway_dict[selected_pathway])
     st.sidebar.success(f"发现 {len(genes)} 个成员基因")
     
-    # --- 主界面：解析基因 ---
+    # --- 主界面 ---
     st.subheader(f"📍 通路成员解析: {selected_pathway}")
     st.text_area("基因清单 (可复制)", ", ".join(genes), height=100)
     
-    # --- 第二步：靶点分析 ---
     st.divider()
     st.subheader("第二步：靶点深度实验分析")
     
@@ -107,33 +113,31 @@ if selected_pathway:
             # 1. PPI 获取
             partners = get_ppi_partners(target_input, limit=ppi_limit)
             all_targets = [target_input] + partners
-            st.write(f"🔗 **PPI 网络节点:** {', '.join(all_targets)}")
+            st.info(f"🔗 **PPI 网络节点:** {', '.join(all_targets)}")
             
             # 2. 抑制剂获取
             all_res = []
             for t in all_targets:
-                df_inh = get_inhibitors(t)
+                df_inh = get_inhibitors_rest(t)
                 if not df_inh.empty:
                     all_res.append(df_inh)
             
             if all_res:
                 final_df = pd.concat(all_res, ignore_index=True)
+                final_df['pchembl_value'] = pd.to_numeric(final_df['pchembl_value'])
                 final_df = final_df.sort_values('pchembl_value', ascending=False)
                 
-                # --- 结果显示 ---
-                st.write("### 💊 综合抑制剂清单 (实时在线数据)")
+                st.write("### 💊 综合抑制剂清单")
                 st.dataframe(final_df, use_container_width=True)
                 
-                # --- 结构显示 ---
-                st.write("### 🎨 活性最强分子结构预览 (Top 1)")
+                st.write("### 🎨 活性最强分子结构预览")
                 top_smiles = final_df.iloc[0]['canonical_smiles']
                 mol = Chem.MolFromSmiles(top_smiles)
                 if mol:
                     img = Draw.MolToImage(mol, size=(400, 400))
                     st.image(img, caption=f"Top Molecule: {final_df.iloc[0]['molecule_chembl_id']}")
                 
-                # 下载按钮
                 csv = final_df.to_csv(index=False).encode('utf-8')
-                st.download_button("下载结果表格 (CSV)", csv, "ppi_inhibitors.csv", "text/csv")
+                st.download_button("下载 CSV 结果", csv, "ppi_inhibitors.csv", "text/csv")
             else:
-                st.warning("未能找到相关小分子抑制剂。")
+                st.warning("未能在线找到高活性小分子。")
