@@ -23,3 +23,9 @@ requests
 chembl_webresource_client
 rdkit
 Pillow
+rdkit
+streamlit
+pandas
+gseapy
+requests
+Pillow
